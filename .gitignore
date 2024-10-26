@@ -1,5 +1,6 @@
 .DS_Store
-homeworks/hw1/data/hw1_data
+homeworks/hw1/data/*pth
+homeworks/hw1/data/*pkl
 homeworks/test
 
 # Byte-compiled / optimized / DLL files
