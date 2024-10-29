@@ -18,31 +18,29 @@ class MultiHeadAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
 
-        # # Add dropout for regularization and memory efficiency
-        # self.attn_dropout = nn.Dropout(0.1)
-        # self.proj_dropout = nn.Dropout(0.1)
-
     def forward(self, x, mask=None):
         batch_size, seq_len, _ = x.shape
 
+        # Separate Q, K, V projections and reshape for multi-head attention
         q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
+        # Attention scores with scaled dot product
         scale = math.sqrt(self.head_dim)
         scores = torch.matmul(q, k.transpose(-2, -1)) / scale
 
+        # Apply mask if provided (converting mask to proper shape)
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float('-inf'))
 
+        # Apply softmax and compute weighted sum
         attn = F.softmax(scores, dim=-1)
-        # attn = self.attn_dropout(attn)
-
         context = torch.matmul(attn, v)
 
+        # Reshape and project output
         context = context.transpose(1, 2).contiguous()
         context = context.view(batch_size, seq_len, self.d_model)
-        # output = self.proj_dropout(self.out_proj(context))
         output = self.out_proj(context)
 
         return output
@@ -54,6 +52,8 @@ class TransformerBlock(nn.Module):
         self.attention = MultiHeadAttention(d_model, num_heads)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
+        
+        # FFN with GELU activation
         self.ffn = nn.Sequential(
             nn.Linear(d_model, 4 * d_model),
             nn.GELU(),
@@ -61,25 +61,21 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(self, x, mask=None):
-        # Attention with residual connection and layer norm
-        attended = self.attention(self.norm1(x), mask)
-        x = x + attended
-
-        # FFN with residual connection and layer norm
-        transformed = self.ffn(self.norm2(x))
-        x = x + transformed
-
-        return x
+        # Pre-norm architecture
+        attended = x + self.attention(self.norm1(x), mask)
+        output = attended + self.ffn(self.norm2(attended))
+        return output
 
 
 class ImageGPT(nn.Module):
-    def __init__(self, image_size, d_model=128, num_heads=4, num_layers=2):
+    def __init__(self, image_size, vocab_size=2, d_model=128, num_heads=4, num_layers=2):
         super().__init__()
         self.seq_len = image_size[0] * image_size[1] + 1  # +1 for <bos> token
         self.d_model = d_model
+        self.vocab_size = vocab_size
 
         # Token and position embeddings
-        self.token_embedding = nn.Embedding(3, d_model)  # 3 for [<bos>, 0, 1]
+        self.token_embedding = nn.Embedding(vocab_size + 1, d_model)  # +1 for <bos> token
         self.position_embedding = nn.Parameter(torch.zeros(1, self.seq_len, d_model))
 
         # Transformer layers
@@ -88,7 +84,8 @@ class ImageGPT(nn.Module):
         ])
 
         # Output head
-        self.out = nn.Linear(d_model, 2)  # 2 for binary prediction
+        self.norm = nn.LayerNorm(d_model)  # Final layer norm
+        self.out = nn.Linear(d_model, vocab_size)  # Doesn't predict <bos> token
 
         self.initialize_weights()
 
@@ -96,9 +93,15 @@ class ImageGPT(nn.Module):
         # Initialize embeddings and position encodings
         nn.init.normal_(self.token_embedding.weight, std=0.02)
         nn.init.normal_(self.position_embedding, std=0.02)
+        
+        # Initialize linear layers
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
 
     def forward(self, x, mask=None):
-
         batch_size, seq_len = x.shape
 
         # Add embeddings
@@ -110,7 +113,8 @@ class ImageGPT(nn.Module):
         for block in self.transformer_blocks:
             x = block(x, mask)
 
-        # Output logits
+        # Apply final layer norm and output projection
+        x = self.norm(x)
         logits = self.out(x)
 
         return logits
