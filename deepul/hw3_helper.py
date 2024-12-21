@@ -1,10 +1,12 @@
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.data
 import torchvision
 from torchvision import transforms as transforms
 from .utils import *
 from .hw3_utils.hw3_models import GoogLeNet
+from torchvision.models import inception_v3
 from PIL import Image as PILImage
 import scipy.ndimage
 import cv2
@@ -17,6 +19,63 @@ import sys
 softmax = None
 model = None
 device = torch.device("cuda:0")
+
+# Calculate FID score
+def get_inception_features(imgs):
+    inception = inception_v3(pretrained=True, transform_input=False).to(device)
+    inception.eval()
+    
+    def get_features(x):
+        with torch.no_grad():
+            x = F.interpolate(x, size=(299, 299), mode='bilinear', align_corners=False)
+            x = inception.Conv2d_1a_3x3(x)
+            x = inception.Conv2d_2a_3x3(x)
+            x = inception.Conv2d_2b_3x3(x)
+            x = F.max_pool2d(x, kernel_size=3, stride=2)
+            x = inception.Conv2d_3b_1x1(x)
+            x = inception.Conv2d_4a_3x3(x)
+            x = F.max_pool2d(x, kernel_size=3, stride=2)
+            x = inception.Mixed_5b(x)
+            x = inception.Mixed_5c(x)
+            x = inception.Mixed_5d(x)
+            x = inception.Mixed_6a(x)
+            x = inception.Mixed_6b(x)
+            x = inception.Mixed_6c(x)
+            x = inception.Mixed_6d(x)
+            x = inception.Mixed_6e(x)
+            x = inception.Mixed_7a(x)
+            x = inception.Mixed_7b(x)
+            x = inception.Mixed_7c(x)
+            x = F.adaptive_avg_pool2d(x, output_size=(1, 1))
+            return x.reshape(x.shape[0], -1)
+    
+    features = []
+    batch_size = 50  # Process in small batches to avoid memory issues
+    n_batches = len(imgs) // batch_size + (1 if len(imgs) % batch_size != 0 else 0)
+    
+    for i in range(n_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, len(imgs))
+        batch = torch.FloatTensor(imgs[start:end]).to(device)
+        batch = (batch * 2) - 1  # Scale to [-1, 1]
+        batch = batch.permute(0, 3, 1, 2)  # NHWC to NCHW
+        features.append(get_features(batch).cpu().numpy())
+    
+    return np.concatenate(features, axis=0)
+
+
+def calculate_fid(real_features, fake_features):
+    mu1, sigma1 = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
+    mu2, sigma2 = fake_features.mean(axis=0), np.cov(fake_features, rowvar=False)
+    
+    diff = mu1 - mu2
+    covmean = scipy.linalg.sqrtm(sigma1.dot(sigma2))
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    
+    fid_score = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2 * covmean)
+    return float(fid_score)
+
 
 def plot_gan_training(losses, title, fname):
     plt.figure()
@@ -101,7 +160,7 @@ def calculate_is(samples):
     return np.exp(kl)
 
 def load_q2_data():
-    train_data = torchvision.datasets.CIFAR10("./data", transform=torchvision.transforms.ToTensor(),
+    train_data = torchvision.datasets.CIFAR10("homeworks/hw3/data", transform=torchvision.transforms.ToTensor(),
                                               download=True, train=True)
     return train_data
 
@@ -116,8 +175,17 @@ def q2_save_results(fn):
     train_losses, samples = fn(train_data)
 
     print("Inception score:", calculate_is(samples.transpose([0, 3, 1, 2])))
-    plot_gan_training(train_losses, 'Q2 Losses', 'results/q2_losses.png')
-    show_samples(samples[:100] * 255.0, fname='results/q2_samples.png', title=f'CIFAR-10 generated samples')
+    
+    # Get features for real and generated images
+    real_features = get_inception_features(train_data)
+    fake_features = get_inception_features(samples)
+    
+    # Calculate FID
+    fid_score = calculate_fid(real_features, fake_features)
+    print(f"FID Score: {fid_score}")
+
+    plot_gan_training(train_losses, 'Q2 Losses', 'results/hw3/q2_losses.png')
+    show_samples(samples[:100] * 255.0, fname='results/hw3/q2_samples.png', title='CIFAR-10 generated samples')
 
 ######################
 ##### Question 3 #####
