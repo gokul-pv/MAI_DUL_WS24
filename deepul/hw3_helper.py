@@ -150,7 +150,7 @@ def calculate_is(samples):
     assert (len(samples[0].shape) == 3)
 
     model = GoogLeNet().to(ptu.device)
-    model.load_state_dict(torch.load("deepul/deepul/hw3_utils/classifier.pt"))
+    model.load_state_dict(torch.load("deepul/hw3_utils/classifier.pt"))
     softmax = nn.Sequential(model, nn.Softmax(dim=1))
 
     bs = 100
@@ -187,7 +187,7 @@ def q2_save_results(fn):
     print("Inception score:", calculate_is(samples.transpose([0, 3, 1, 2])))
     
     # Calculate FID
-    fid_score = calculate_fid(train_data, samples.transpose([0, 3, 1, 2]))
+    fid_score = calculate_fid(torch.FloatTensor(train_data), samples.transpose([0, 3, 1, 2]))
     print(f"FID Score: {fid_score}")
 
     plot_gan_training(train_losses, 'Q2 Losses', 'results/hw3/q2_losses.png')
