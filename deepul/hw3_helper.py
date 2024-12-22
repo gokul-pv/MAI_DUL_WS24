@@ -8,6 +8,8 @@ from .utils import *
 from .hw3_utils.hw3_models import GoogLeNet
 from torchvision.models import inception_v3
 from PIL import Image as PILImage
+from scipy import linalg
+
 import scipy.ndimage
 import cv2
 import deepul.pytorch_util as ptu
@@ -20,60 +22,68 @@ softmax = None
 model = None
 device = torch.device("cuda:0")
 
-# Calculate FID score
-def get_inception_features(imgs):
-    inception = inception_v3(pretrained=True, transform_input=False).to(device)
-    inception.eval()
+
+def get_activations(images, batch_size=32):
+    """Get Inception activations for a batch of images."""
+
+    device = torch.device("cuda" if torch.cuda.is_available() 
+                         else "mps" if torch.backends.mps.is_available() 
+                         else "cpu")
     
-    def get_features(x):
-        with torch.no_grad():
-            x = F.interpolate(x, size=(299, 299), mode='bilinear', align_corners=False)
-            x = inception.Conv2d_1a_3x3(x)
-            x = inception.Conv2d_2a_3x3(x)
-            x = inception.Conv2d_2b_3x3(x)
-            x = F.max_pool2d(x, kernel_size=3, stride=2)
-            x = inception.Conv2d_3b_1x1(x)
-            x = inception.Conv2d_4a_3x3(x)
-            x = F.max_pool2d(x, kernel_size=3, stride=2)
-            x = inception.Mixed_5b(x)
-            x = inception.Mixed_5c(x)
-            x = inception.Mixed_5d(x)
-            x = inception.Mixed_6a(x)
-            x = inception.Mixed_6b(x)
-            x = inception.Mixed_6c(x)
-            x = inception.Mixed_6d(x)
-            x = inception.Mixed_6e(x)
-            x = inception.Mixed_7a(x)
-            x = inception.Mixed_7b(x)
-            x = inception.Mixed_7c(x)
-            x = F.adaptive_avg_pool2d(x, output_size=(1, 1))
-            return x.reshape(x.shape[0], -1)
+    # Load and prepare inception model
+    inception_model = inception_v3(pretrained=True, transform_input=False)
+    # Remove final FC layer
+    inception_model.fc = nn.Identity()
+    inception_model.to(device)
+    inception_model.eval()
     
-    features = []
-    batch_size = 50  # Process in small batches to avoid memory issues
-    n_batches = len(imgs) // batch_size + (1 if len(imgs) % batch_size != 0 else 0)
+    activations = []
     
-    for i in range(n_batches):
-        start = i * batch_size
-        end = min((i + 1) * batch_size, len(imgs))
-        batch = torch.FloatTensor(imgs[start:end]).to(device)
-        batch = (batch * 2) - 1  # Scale to [-1, 1]
-        batch = batch.permute(0, 3, 1, 2)  # NHWC to NCHW
-        features.append(get_features(batch).cpu().numpy())
+    with torch.no_grad():
+        for i in range(0, len(images), batch_size):
+            batch = torch.tensor(images[i:i + batch_size]).to(device)
+            
+            # Resize images to inception input size (299x299)
+            batch = F.interpolate(batch, size=(299, 299), mode='bilinear', align_corners=False)
+            
+            # Get activations
+            batch_activations = inception_model(batch)
+            activations.append(batch_activations.cpu().numpy())
     
-    return np.concatenate(features, axis=0)
+    return np.concatenate(activations, axis=0)
 
 
-def calculate_fid(real_features, fake_features):
-    mu1, sigma1 = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
-    mu2, sigma2 = fake_features.mean(axis=0), np.cov(fake_features, rowvar=False)
+def calculate_fid(real_images, generated_images):
+    """
+    Calculate Fréchet Inception Distance between real and generated images.
+    
+    Args:
+        real_images: numpy array of shape (N, 3, H, W) in range [0, 1]
+        generated_images: numpy array of shape (N, 3, H, W) in range [0, 1]
+    
+    Returns:
+        fid_score: float, the FID score between real and generated images
+    """
+
+    real_activations = get_activations(real_images)
+    generated_activations = get_activations(generated_images)
+    
+    mu1 = np.mean(real_activations, axis=0)
+    sigma1 = np.cov(real_activations, rowvar=False)
+    
+    mu2 = np.mean(generated_activations, axis=0)
+    sigma2 = np.cov(generated_activations, rowvar=False)
+    
+    # Calculate FID score
+    # FID = ||mu_1 - mu_2||^2 + Tr(sigma_1 + sigma_2 - 2*sqrt(sigma_1*sigma_2))
     
     diff = mu1 - mu2
-    covmean = scipy.linalg.sqrtm(sigma1.dot(sigma2))
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
     if np.iscomplexobj(covmean):
         covmean = covmean.real
     
     fid_score = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2 * covmean)
+    
     return float(fid_score)
 
 
@@ -176,12 +186,8 @@ def q2_save_results(fn):
 
     print("Inception score:", calculate_is(samples.transpose([0, 3, 1, 2])))
     
-    # Get features for real and generated images
-    real_features = get_inception_features(train_data)
-    fake_features = get_inception_features(samples)
-    
     # Calculate FID
-    fid_score = calculate_fid(real_features, fake_features)
+    fid_score = calculate_fid(train_data, samples.transpose([0, 3, 1, 2]))
     print(f"FID Score: {fid_score}")
 
     plot_gan_training(train_losses, 'Q2 Losses', 'results/hw3/q2_losses.png')
