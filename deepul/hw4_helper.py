@@ -40,7 +40,7 @@ def save_multi_scatter_2d(data: np.ndarray) -> None:
         for j in range(3):
             axs[i, j].scatter(data[i * 3 + j, :, 0], data[i * 3 + j, :, 1])
     plt.title("Q1 Samples")
-    savefig("results/q1_samples.png")
+    savefig("results/hw4/q1_samples.png")
 
 
 def q1_save_results(fn):
@@ -54,7 +54,7 @@ def q1_save_results(fn):
         train_losses,
         test_losses,
         f"Q1 Train Plot",
-        f"results/q1_train_plot.png"
+        "results/hw4/q1_train_plot.png"
     )
 
     save_multi_scatter_2d(samples)
@@ -65,9 +65,9 @@ def q1_save_results(fn):
 ######################
 
 def load_q2_data():
-    train_data = torchvision.datasets.CIFAR10("./data", transform=torchvision.transforms.ToTensor(),
+    train_data = torchvision.datasets.CIFAR10("./homeworks/hw4/data", transform=torchvision.transforms.ToTensor(),
                                               download=True, train=True)
-    test_data = torchvision.datasets.CIFAR10("./data", transform=torchvision.transforms.ToTensor(),
+    test_data = torchvision.datasets.CIFAR10("./homeworks/hw4/data", transform=torchvision.transforms.ToTensor(),
                                               download=True, train=False)
     return train_data, test_data
 
@@ -89,11 +89,11 @@ def q2_save_results(fn):
         train_losses,
         test_losses,
         "Q2 Train Plot",
-        "results/q2_train_plot.png"
+        "results/hw4/q2_train_plot.png"
     ) 
 
     samples = samples.reshape(-1, *samples.shape[2:])
-    show_samples(samples * 255.0, fname="results/q2_samples.png", title=f"Q2 CIFAR-10 generated samples")
+    show_samples(samples * 255.0, fname="results/hw4/q2_samples.png", title="Q2 CIFAR-10 generated samples")
 
 
 ######################
